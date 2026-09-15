@@ -141,6 +141,23 @@ final class RuntimeSupportTests: XCTestCase {
         XCTAssertEqual(normalized.wallpaper.opacity, 1)
         XCTAssertEqual(normalized.wallpaper.blur, 0)
         XCTAssertEqual(normalized.wallpaper.overlay, 0.9)
+        XCTAssertTrue(normalized.wallpaper.enabled)
+    }
+
+    func testWallpaperToggleKeepsFileWhenHidden() throws {
+        var wallpaper = WallpaperSettings()
+        wallpaper.path = "/tmp/wall.png"
+        XCTAssertTrue(wallpaper.isVisible)
+
+        wallpaper.enabled = false
+        XCTAssertFalse(wallpaper.isVisible)
+        XCTAssertEqual(wallpaper.path, "/tmp/wall.png")
+
+        let legacy = Data(#"{"path":"/tmp/old.png","opacity":0.5}"#.utf8)
+        let decoded = try JSONDecoder().decode(WallpaperSettings.self, from: legacy)
+        XCTAssertTrue(decoded.enabled)
+        XCTAssertTrue(decoded.isVisible)
+        XCTAssertEqual(decoded.path, "/tmp/old.png")
     }
 
     func testLegacySettingsDefaultToTrailingControlDock() throws {

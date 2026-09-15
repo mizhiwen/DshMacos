@@ -44,7 +44,7 @@ struct ContentView: View {
         if runtime.isReady, let url = runtime.serviceURL {
             HarnessWebView(
                 url: url,
-                wallpaperEnabled: !model.settings.wallpaper.path.isEmpty,
+                wallpaperEnabled: model.settings.wallpaper.isVisible,
                 isDarkMode: isDarkMode
             )
             .background(Color.clear)

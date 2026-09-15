@@ -87,6 +87,7 @@ final class AppModel: ObservableObject {
         guard panel.runModal() == .OK, let source = panel.url else { return }
         do {
             settings.wallpaper.path = try store.importWallpaper(from: source).path
+            settings.wallpaper.enabled = true
             persistenceError = nil
         } catch {
             persistenceError = error.localizedDescription

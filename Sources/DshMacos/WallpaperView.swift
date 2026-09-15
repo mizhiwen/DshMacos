@@ -10,35 +10,44 @@ struct WallpaperView: View {
             ZStack {
                 baseColor
 
-                switch wallpaperMediaKind(forPath: settings.path) {
-                case .video where FileManager.default.fileExists(atPath: settings.path):
-                    mediaChrome(size: proxy.size) {
-                        LoopingVideoWallpaper(
-                            url: URL(fileURLWithPath: settings.path),
-                            fit: settings.fit
-                        )
-                    }
-                case .animatedImage where FileManager.default.fileExists(atPath: settings.path):
-                    mediaChrome(size: proxy.size) {
-                        AnimatedImageWallpaper(
-                            url: URL(fileURLWithPath: settings.path),
-                            fit: settings.fit
-                        )
-                    }
-                case .image:
-                    if let image = NSImage(contentsOfFile: settings.path) {
-                        mediaChrome(size: proxy.size) {
-                            wallpaperImage(image, size: proxy.size)
-                        }
-                    } else {
-                        fallbackGradient
-                    }
-                default:
+                if settings.isVisible {
+                    visibleWallpaper(size: proxy.size)
+                } else {
                     fallbackGradient
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             .clipped()
+        }
+    }
+
+    @ViewBuilder
+    private func visibleWallpaper(size: CGSize) -> some View {
+        switch wallpaperMediaKind(forPath: settings.path) {
+        case .video where FileManager.default.fileExists(atPath: settings.path):
+            mediaChrome(size: size) {
+                LoopingVideoWallpaper(
+                    url: URL(fileURLWithPath: settings.path),
+                    fit: settings.fit
+                )
+            }
+        case .animatedImage where FileManager.default.fileExists(atPath: settings.path):
+            mediaChrome(size: size) {
+                AnimatedImageWallpaper(
+                    url: URL(fileURLWithPath: settings.path),
+                    fit: settings.fit
+                )
+            }
+        case .image:
+            if let image = NSImage(contentsOfFile: settings.path) {
+                mediaChrome(size: size) {
+                    wallpaperImage(image, size: size)
+                }
+            } else {
+                fallbackGradient
+            }
+        default:
+            fallbackGradient
         }
     }
 

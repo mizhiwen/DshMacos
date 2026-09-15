@@ -272,6 +272,8 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle("显示壁纸", isOn: $model.settings.wallpaper.enabled)
+
                 WallpaperPreview(settings: $model.settings.wallpaper)
                     .frame(height: 188)
                     .listRowInsets(EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10))
@@ -404,6 +406,14 @@ private struct WallpaperPreview: View {
                         Image(systemName: "photo.on.rectangle.angled")
                             .font(.system(size: 22, weight: .light))
                         Text("还没有壁纸")
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(.secondary)
+                } else if !settings.enabled {
+                    VStack(spacing: 6) {
+                        Image(systemName: "eye.slash")
+                            .font(.system(size: 18, weight: .light))
+                        Text("已关闭")
                             .font(.system(size: 12))
                     }
                     .foregroundStyle(.secondary)

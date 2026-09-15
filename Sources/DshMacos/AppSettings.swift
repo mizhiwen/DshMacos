@@ -44,6 +44,7 @@ struct ControlDockSettings: Codable, Equatable {
 }
 
 struct WallpaperSettings: Codable, Equatable {
+    var enabled = true
     var path = ""
     var fit: WallpaperFit = .cover
     var opacity = 0.84
@@ -51,6 +52,33 @@ struct WallpaperSettings: Codable, Equatable {
     var overlay = 0.34
     var positionX = 0.5
     var positionY = 0.5
+
+    var isVisible: Bool { enabled && !path.isEmpty }
+
+    enum CodingKeys: String, CodingKey {
+        case enabled
+        case path
+        case fit
+        case opacity
+        case blur
+        case overlay
+        case positionX
+        case positionY
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        path = try values.decodeIfPresent(String.self, forKey: .path) ?? path
+        fit = try values.decodeIfPresent(WallpaperFit.self, forKey: .fit) ?? fit
+        opacity = try values.decodeIfPresent(Double.self, forKey: .opacity) ?? opacity
+        blur = try values.decodeIfPresent(Double.self, forKey: .blur) ?? blur
+        overlay = try values.decodeIfPresent(Double.self, forKey: .overlay) ?? overlay
+        positionX = try values.decodeIfPresent(Double.self, forKey: .positionX) ?? positionX
+        positionY = try values.decodeIfPresent(Double.self, forKey: .positionY) ?? positionY
+    }
 
     func normalized() -> WallpaperSettings {
         var copy = self
