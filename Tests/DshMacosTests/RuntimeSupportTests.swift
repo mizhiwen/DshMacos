@@ -1,5 +1,6 @@
-import XCTest
+import AVFoundation
 import AppKit
+import XCTest
 @testable import DshMacos
 
 final class RuntimeSupportTests: XCTestCase {
@@ -139,6 +140,20 @@ final class RuntimeSupportTests: XCTestCase {
         XCTAssertEqual(normalized.wallpaper.opacity, 1)
         XCTAssertEqual(normalized.wallpaper.blur, 0)
         XCTAssertEqual(normalized.wallpaper.overlay, 0.9)
+    }
+
+
+    func testWallpaperFilePolicyAcceptsStillAndMotion() {
+        XCTAssertEqual(wallpaperFilePolicy(pathExtension: "png")?.kind, .image)
+        XCTAssertEqual(wallpaperFilePolicy(pathExtension: "HEIC")?.kind, .image)
+        XCTAssertEqual(wallpaperFilePolicy(pathExtension: "gif")?.kind, .animatedImage)
+        XCTAssertEqual(wallpaperFilePolicy(pathExtension: "mp4")?.kind, .video)
+        XCTAssertEqual(wallpaperFilePolicy(pathExtension: "MOV")?.kind, .video)
+        XCTAssertNil(wallpaperFilePolicy(pathExtension: "txt"))
+        XCTAssertEqual(wallpaperMediaKind(forPath: "/tmp/loop.m4v"), .video)
+        XCTAssertEqual(wallpaperMediaKind(forPath: ""), .none)
+        XCTAssertEqual(wallpaperVideoGravity(for: .cover), .resizeAspectFill)
+        XCTAssertEqual(wallpaperVideoGravity(for: .contain), .resizeAspect)
     }
 
     func testSettingsStoreRoundTrip() throws {

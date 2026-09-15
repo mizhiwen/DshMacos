@@ -10,18 +10,45 @@ struct WallpaperView: View {
             ZStack {
                 baseColor
 
-                if let image = NSImage(contentsOfFile: settings.path) {
-                    wallpaperImage(image, size: proxy.size)
-                        .opacity(settings.opacity)
-                        .blur(radius: settings.blur)
-                    readabilityOverlay
-                } else {
+                switch wallpaperMediaKind(forPath: settings.path) {
+                case .video where FileManager.default.fileExists(atPath: settings.path):
+                    mediaChrome(size: proxy.size) {
+                        LoopingVideoWallpaper(
+                            url: URL(fileURLWithPath: settings.path),
+                            fit: settings.fit
+                        )
+                    }
+                case .animatedImage where FileManager.default.fileExists(atPath: settings.path):
+                    mediaChrome(size: proxy.size) {
+                        AnimatedImageWallpaper(
+                            url: URL(fileURLWithPath: settings.path),
+                            fit: settings.fit
+                        )
+                    }
+                case .image:
+                    if let image = NSImage(contentsOfFile: settings.path) {
+                        mediaChrome(size: proxy.size) {
+                            wallpaperImage(image, size: proxy.size)
+                        }
+                    } else {
+                        fallbackGradient
+                    }
+                default:
                     fallbackGradient
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             .clipped()
         }
+    }
+
+    @ViewBuilder
+    private func mediaChrome<Content: View>(size: CGSize, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(width: size.width, height: size.height)
+            .opacity(settings.opacity)
+            .blur(radius: settings.blur)
+        readabilityOverlay
     }
 
     private var baseColor: Color {

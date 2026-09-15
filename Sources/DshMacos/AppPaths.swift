@@ -54,14 +54,15 @@ final class SettingsStore {
     }
 
     func importWallpaper(from source: URL) throws -> URL {
-        let allowed = ["png", "jpg", "jpeg", "webp"]
         let ext = source.pathExtension.lowercased()
-        guard allowed.contains(ext) else {
-            throw AppError.message("壁纸仅支持 PNG、JPEG 和 WebP")
+        guard let policy = wallpaperFilePolicy(pathExtension: ext) else {
+            throw AppError.message("壁纸支持图片、GIF 和视频（MP4 / MOV）")
         }
         let values = try source.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-        guard values.isRegularFile == true, (values.fileSize ?? 0) <= 20 * 1_024 * 1_024 else {
-            throw AppError.message("壁纸文件无效或超过 20 MB")
+        let fileSize = values.fileSize ?? 0
+        guard values.isRegularFile == true, fileSize > 0, fileSize <= policy.maxBytes else {
+            let limit = policy.maxBytes / (1_024 * 1_024)
+            throw AppError.message("壁纸文件无效或超过 \(limit) MB")
         }
         try AppPaths.prepare()
         let destination = AppPaths.wallpapers

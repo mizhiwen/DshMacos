@@ -74,8 +74,8 @@ final class AppModel: ObservableObject {
     func chooseWallpaper() {
         let panel = NSOpenPanel()
         panel.title = "选择 Harness 壁纸"
-        panel.prompt = "使用此图片"
-        panel.allowedContentTypes = [.png, .jpeg, .webP]
+        panel.prompt = "使用此壁纸"
+        panel.allowedContentTypes = wallpaperPickerContentTypes()
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
