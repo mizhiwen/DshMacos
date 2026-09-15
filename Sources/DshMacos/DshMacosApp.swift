@@ -15,7 +15,7 @@ struct DshMacosApp: App {
         .commands {
             CommandGroup(after: .appSettings) {
                 Button("Harness 设置…") {
-                    model.isShowingSettings = true
+                    model.showSettings()
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
@@ -82,9 +82,11 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
     final class Coordinator {
         weak var configuredWindow: NSWindow?
         var observers: [NSObjectProtocol] = []
+        let clickMonitor = TitlebarClickMonitor()
 
         deinit {
             observers.forEach(NotificationCenter.default.removeObserver)
+            clickMonitor.stop()
         }
     }
 
@@ -108,6 +110,15 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.titlebarSeparatorStyle = .none
+            window.styleMask.insert(.fullSizeContentView)
+            window.styleMask.insert(.resizable)
+            window.collectionBehavior.insert(.fullScreenPrimary)
+            window.collectionBehavior.remove(.fullScreenNone)
+            window.collectionBehavior.remove(.fullScreenAuxiliary)
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            TitlebarHitInstaller.install(on: window)
+            coordinator.clickMonitor.install(on: window)
 
             guard coordinator.configuredWindow !== window else { return }
             coordinator.configuredWindow = window

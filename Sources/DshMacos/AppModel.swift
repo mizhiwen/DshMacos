@@ -43,6 +43,11 @@ final class AppModel: ObservableObject {
         if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
+    func showSettings() {
+        isShowingSettings = true
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func start() {
         Task { await runtime.start(using: settings) }
     }

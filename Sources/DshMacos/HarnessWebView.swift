@@ -29,7 +29,7 @@ struct HarnessWebView: NSViewRepresentable {
             )
         )
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = TitlebarPassthroughWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
@@ -122,6 +122,22 @@ struct HarnessWebView: NSViewRepresentable {
             default: return nil
             }
         }
+    }
+}
+
+
+final class TitlebarPassthroughWebView: WKWebView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let band = NSRect(
+            x: bounds.minX,
+            y: isFlipped ? bounds.minY : bounds.maxY - TitlebarHitMetrics.height,
+            width: bounds.width,
+            height: TitlebarHitMetrics.height
+        )
+        if band.contains(point) {
+            return nil
+        }
+        return super.hitTest(point)
     }
 }
 

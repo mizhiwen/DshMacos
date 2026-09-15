@@ -23,6 +23,26 @@ enum AppearanceMode: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ControlDockEdge: String, Codable, CaseIterable, Identifiable {
+    case top
+    case bottom
+    case leading
+    case trailing
+
+    var id: String { rawValue }
+}
+
+struct ControlDockSettings: Codable, Equatable {
+    var edge: ControlDockEdge = .trailing
+    var offset = 0.16
+
+    func normalized() -> ControlDockSettings {
+        var copy = self
+        copy.offset = copy.offset.clamped(to: 0 ... 1)
+        return copy
+    }
+}
+
 struct WallpaperSettings: Codable, Equatable {
     var path = ""
     var fit: WallpaperFit = .cover
@@ -44,7 +64,7 @@ struct WallpaperSettings: Codable, Equatable {
 }
 
 struct AppSettings: Codable, Equatable {
-    static let currentVersion = 3
+    static let currentVersion = 5
 
     var version = AppSettings.currentVersion
     var autoStart = false
@@ -56,6 +76,7 @@ struct AppSettings: Codable, Equatable {
     var startupTimeoutSeconds = 60
     var appearanceMode: AppearanceMode = .system
     var wallpaper = WallpaperSettings()
+    var controlDock = ControlDockSettings()
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -68,6 +89,7 @@ struct AppSettings: Codable, Equatable {
         case startupTimeoutSeconds
         case appearanceMode
         case wallpaper
+        case controlDock
     }
 
     init() {}
@@ -87,6 +109,7 @@ struct AppSettings: Codable, Equatable {
         appearanceMode = try values.decodeIfPresent(AppearanceMode.self, forKey: .appearanceMode)
             ?? appearanceMode
         wallpaper = try values.decodeIfPresent(WallpaperSettings.self, forKey: .wallpaper) ?? wallpaper
+        controlDock = try values.decodeIfPresent(ControlDockSettings.self, forKey: .controlDock) ?? controlDock
     }
 
     func normalized() -> AppSettings {
@@ -97,6 +120,9 @@ struct AppSettings: Codable, Equatable {
         {
             copy.command = "dsh"
             copy.arguments = Array(copy.arguments.dropFirst(2))
+        }
+        if copy.version < 5, copy.controlDock.edge == .top {
+            copy.controlDock = ControlDockSettings()
         }
         copy.version = AppSettings.currentVersion
         copy.command = copy.command.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -112,6 +138,7 @@ struct AppSettings: Codable, Equatable {
         copy.externalURL = copy.externalURL.trimmingCharacters(in: .whitespacesAndNewlines)
         copy.startupTimeoutSeconds = min(180, max(5, copy.startupTimeoutSeconds))
         copy.wallpaper = copy.wallpaper.normalized()
+        copy.controlDock = copy.controlDock.normalized()
         return copy
     }
 }

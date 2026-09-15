@@ -105,6 +105,7 @@ final class RuntimeSupportTests: XCTestCase {
 
         XCTAssertEqual(decoded.appearanceMode, .system)
         XCTAssertEqual(decoded.arguments, ["web", "--no-open"])
+        XCTAssertEqual(decoded.controlDock.edge, .trailing)
     }
 
     func testDshFallsBackToCachedExecutable() throws {
@@ -142,6 +143,87 @@ final class RuntimeSupportTests: XCTestCase {
         XCTAssertEqual(normalized.wallpaper.overlay, 0.9)
     }
 
+    func testLegacySettingsDefaultToTrailingControlDock() throws {
+        let data = Data(#"{"version":2,"command":"dsh","arguments":["web"]}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: data).normalized()
+        XCTAssertEqual(decoded.controlDock.edge, .trailing)
+        XCTAssertEqual(decoded.controlDock.offset, 0.16)
+    }
+
+    func testControlDockSnapsToNearestEdge() {
+        let canvas = CGSize(width: 1000, height: 800)
+        let pill = CGSize(width: 36, height: 36)
+
+        XCTAssertEqual(
+            snappedControlDock(center: CGPoint(x: 500, y: 20), canvas: canvas, pill: pill).edge,
+            .top
+        )
+        XCTAssertEqual(
+            snappedControlDock(center: CGPoint(x: 500, y: 780), canvas: canvas, pill: pill).edge,
+            .bottom
+        )
+        XCTAssertEqual(
+            snappedControlDock(center: CGPoint(x: 12, y: 400), canvas: canvas, pill: pill).edge,
+            .leading
+        )
+        XCTAssertEqual(
+            snappedControlDock(center: CGPoint(x: 988, y: 400), canvas: canvas, pill: pill).edge,
+            .trailing
+        )
+    }
+
+    func testTitlebarDoubleClickFollowsSystemPreference() {
+        XCTAssertEqual(titlebarDoubleClickAction(for: nil), .fill)
+        XCTAssertEqual(titlebarDoubleClickAction(for: "Fill"), .fill)
+        XCTAssertEqual(titlebarDoubleClickAction(for: "Maximize"), .zoom)
+        XCTAssertEqual(titlebarDoubleClickAction(for: "Minimize"), .miniaturize)
+        XCTAssertEqual(titlebarDoubleClickAction(for: "None"), .none)
+    }
+
+    func testTitlebarFillUsesVisibleFrameAndDetectsAlreadyFilled() {
+        let visible = NSRect(x: 0, y: 25, width: 1440, height: 875)
+        XCTAssertEqual(titlebarFilledFrame(for: visible), visible)
+        XCTAssertTrue(framesApproximatelyEqual(visible, NSRect(x: 1, y: 25, width: 1440, height: 875)))
+        XCTAssertFalse(framesApproximatelyEqual(visible, NSRect(x: 120, y: 80, width: 1100, height: 720)))
+    }
+
+    func testTitlebarHitRectSkipsTrafficLightsAndStaysAtTop() {
+        let bounds = NSRect(x: 0, y: 0, width: 1000, height: 800)
+        let unflipped = titlebarHitRect(in: bounds, flipped: false)
+        XCTAssertEqual(unflipped, NSRect(x: 86, y: 764, width: 914, height: 36))
+        XCTAssertTrue(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 790), in: bounds, flipped: false))
+        XCTAssertFalse(shouldHandleTitlebarClick(point: NSPoint(x: 40, y: 790), in: bounds, flipped: false))
+        XCTAssertFalse(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 400), in: bounds, flipped: false))
+
+        let flipped = titlebarHitRect(in: bounds, flipped: true)
+        XCTAssertEqual(flipped.origin, NSPoint(x: 86, y: 0))
+        XCTAssertTrue(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 10), in: bounds, flipped: true))
+        XCTAssertFalse(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 80), in: bounds, flipped: true))
+    }
+
+    func testControlDockOriginHugsTrailingEdge() {
+        let origin = controlDockOrigin(
+            settings: ControlDockSettings(edge: .trailing, offset: 0.5),
+            canvas: CGSize(width: 1000, height: 800),
+            pill: CGSize(width: 36, height: 36)
+        )
+        XCTAssertEqual(origin.x, 1000 - 36 - ControlDockMetrics.edgeInset)
+        XCTAssertGreaterThan(origin.y, ControlDockMetrics.topSafeInset - 0.5)
+    }
+
+    func testControlDockUsesCompactHitSize() {
+        XCTAssertEqual(controlDockHitSize(edge: .trailing), ControlDockMetrics.size)
+        XCTAssertEqual(controlDockHitSize(edge: .top), ControlDockMetrics.size)
+        XCTAssertEqual(controlDockVisualSize(edge: .leading, emphasized: false), ControlDockMetrics.size)
+        XCTAssertEqual(controlDockVisualSize(edge: .bottom, emphasized: true), ControlDockMetrics.size)
+    }
+
+    func testHarnessStatusSymbolMatchesPhase() {
+        XCTAssertEqual(harnessStatusSymbolName(for: .ready), "circle.fill")
+        XCTAssertEqual(harnessStatusSymbolName(for: .stopped), "circle")
+        XCTAssertEqual(harnessStatusSymbolName(for: .failed), "exclamationmark.circle")
+        XCTAssertEqual(harnessStatusSymbolName(for: .starting), "ellipsis.circle")
+    }
 
     func testWallpaperFilePolicyAcceptsStillAndMotion() {
         XCTAssertEqual(wallpaperFilePolicy(pathExtension: "png")?.kind, .image)
