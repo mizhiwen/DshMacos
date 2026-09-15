@@ -29,10 +29,9 @@ struct HarnessWebView: NSViewRepresentable {
             )
         )
 
-        let webView = TitlebarPassthroughWebView(frame: .zero, configuration: configuration)
+        let webView = TransparentWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
-        webView.setValue(false, forKey: "drawsBackground")
         applyNativeAppearance(to: webView, isDarkMode: isDarkMode)
         context.coordinator.webView = webView
         webView.load(URLRequest(url: url))
@@ -46,6 +45,9 @@ struct HarnessWebView: NSViewRepresentable {
             isDarkMode: isDarkMode
         )
         applyNativeAppearance(to: webView, isDarkMode: isDarkMode)
+        webView.superview?.wantsLayer = true
+        webView.superview?.layer?.isOpaque = false
+        webView.superview?.layer?.backgroundColor = NSColor.clear.cgColor
         context.coordinator.applyAppearance()
         if webView.url?.absoluteString != url.absoluteString, !webView.isLoading {
             webView.load(URLRequest(url: url))
@@ -125,8 +127,16 @@ struct HarnessWebView: NSViewRepresentable {
     }
 }
 
+final class TransparentWebView: WKWebView {
+    override var isOpaque: Bool { false }
 
-final class TitlebarPassthroughWebView: WKWebView {
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        superview?.wantsLayer = true
+        superview?.layer?.isOpaque = false
+        superview?.layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
         let band = NSRect(
             x: bounds.minX,
@@ -148,25 +158,44 @@ struct WebAppearance: Equatable {
 
 private func applyNativeAppearance(to webView: WKWebView, isDarkMode: Bool) {
     webView.appearance = NSAppearance(named: isDarkMode ? .darkAqua : .aqua)
+    webView.setValue(false, forKey: "drawsBackground")
+    webView.underPageBackgroundColor = .clear
+    webView.wantsLayer = true
+    webView.layer?.isOpaque = false
+    webView.layer?.backgroundColor = NSColor.clear.cgColor
 }
 
-private func appearanceJavaScript(wallpaperEnabled: Bool, isDarkMode: Bool) -> String {
+func appearanceCSS(wallpaperEnabled: Bool, isDarkMode: Bool) -> String {
     let scheme = isDarkMode ? "dark" : "light"
-    let container = isDarkMode ? "rgba(8, 13, 21, .62)" : "rgba(255, 255, 255, .68)"
-    let elevated = isDarkMode ? "rgba(13, 20, 31, .76)" : "rgba(255, 255, 255, .82)"
-    let floating = isDarkMode ? "rgba(13, 20, 31, .82)" : "rgba(255, 255, 255, .9)"
+    let sidebarWash = isDarkMode
+        ? "linear-gradient(90deg, rgba(8,13,21,.50) 0%, rgba(8,13,21,.16) 62%, rgba(8,13,21,0) 100%)"
+        : "linear-gradient(90deg, rgba(255,255,255,.40) 0%, rgba(255,255,255,.12) 62%, rgba(255,255,255,0) 100%)"
+    let elevated = isDarkMode ? "rgba(13, 20, 31, .58)" : "rgba(255, 255, 255, .72)"
+    let floating = isDarkMode ? "rgba(13, 20, 31, .7)" : "rgba(255, 255, 255, .82)"
+    // Harness writes theme tokens on `body` / `body[data-ds-dark-theme]`.
+    // A :root override is inherited only until body specifies its own value.
+    // Sidebar paints the token twice (column + inner root); keep the token
+    // transparent and wash only the column so the wallpaper can bleed in.
     let wallpaperCSS = wallpaperEnabled ? """
-        :root {
+        html, body, :root, body[data-ds-dark-theme] {
           --dsw-alias-bg-base: transparent !important;
-          --dsw-alias-bg-container: \(container) !important;
+          --dsw-specific-bg-base: transparent !important;
+          --dsw-alias-bg-container: transparent !important;
           --dsw-alias-bg-elevated: \(elevated) !important;
           --dsw-alias-bg-float: \(floating) !important;
-          --dsw-specific-bg-base: transparent !important;
+          --dsw-specific-sidebar-fill: transparent !important;
+          --dsw-specific-input-major: \(floating) !important;
         }
         html, body, #root { background: transparent !important; }
+        [class*="sidebarCol"] > * { background: transparent !important; }
+        [class*="sidebarCol"] { background: \(sidebarWash) !important; }
+        [class*="centerCol"] { background: transparent !important; }
         """ : ""
-    let css = """
-        :root { color-scheme: \(scheme) !important; }
+    let schemeCSS = wallpaperEnabled
+        ? "button, input, textarea { color-scheme: \(scheme); }"
+        : ":root { color-scheme: \(scheme) !important; }"
+    return """
+        \(schemeCSS)
         html {
           -webkit-font-smoothing: antialiased;
           text-rendering: optimizeLegibility;
@@ -174,7 +203,16 @@ private func appearanceJavaScript(wallpaperEnabled: Bool, isDarkMode: Bool) -> S
         button, input, textarea { -webkit-font-smoothing: antialiased; }
         \(wallpaperCSS)
         """
-    let literal = String(data: try! JSONEncoder().encode(css), encoding: .utf8)!
+}
+
+private func appearanceJavaScript(wallpaperEnabled: Bool, isDarkMode: Bool) -> String {
+    let literal = String(
+        data: try! JSONEncoder().encode(appearanceCSS(
+            wallpaperEnabled: wallpaperEnabled,
+            isDarkMode: isDarkMode
+        )),
+        encoding: .utf8
+    )!
     return """
         (() => {
           const id = 'dsh-macos-appearance';
@@ -185,6 +223,18 @@ private func appearanceJavaScript(wallpaperEnabled: Bool, isDarkMode: Bool) -> S
             (document.head || document.documentElement).appendChild(style);
           }
           style.textContent = \(literal);
+          if (\(wallpaperEnabled ? "true" : "false")) {
+            document.querySelectorAll('meta[name="color-scheme"]').forEach((node) => node.remove());
+            const root = document.documentElement;
+            root.style.setProperty('background', 'transparent', 'important');
+            root.style.setProperty('background-color', 'transparent', 'important');
+            if (document.body) {
+              document.body.style.setProperty('background', 'transparent', 'important');
+              document.body.style.setProperty('background-color', 'transparent', 'important');
+              document.body.style.setProperty('--dsw-alias-bg-base', 'transparent', 'important');
+              document.body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent', 'important');
+            }
+          }
         })();
         """
 }

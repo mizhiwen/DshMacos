@@ -14,6 +14,7 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             WallpaperView(settings: model.settings.wallpaper)
+                .ignoresSafeArea()
             content
         }
         .background(
@@ -46,6 +47,7 @@ struct ContentView: View {
                 wallpaperEnabled: !model.settings.wallpaper.path.isEmpty,
                 isDarkMode: isDarkMode
             )
+            .background(Color.clear)
             .id(url)
         } else {
             launchSurface

@@ -238,6 +238,23 @@ final class RuntimeSupportTests: XCTestCase {
         XCTAssertEqual(wallpaperVideoGravity(for: .contain), .resizeAspect)
     }
 
+    func testWallpaperCSSOverridesBodyThemeTokens() {
+        let enabled = appearanceCSS(wallpaperEnabled: true, isDarkMode: false)
+        XCTAssertTrue(enabled.contains("body[data-ds-dark-theme]"))
+        XCTAssertTrue(enabled.contains("--dsw-alias-bg-base: transparent !important"))
+        XCTAssertTrue(enabled.contains("--dsw-specific-sidebar-fill: transparent !important"))
+        XCTAssertTrue(enabled.contains("[class*=\"sidebarCol\"]"))
+        XCTAssertTrue(enabled.contains("linear-gradient"))
+        XCTAssertTrue(enabled.contains("html, body, #root { background: transparent !important; }"))
+
+        XCTAssertFalse(enabled.contains(":root { color-scheme:"))
+
+        let disabled = appearanceCSS(wallpaperEnabled: false, isDarkMode: false)
+        XCTAssertFalse(disabled.contains("--dsw-alias-bg-base"))
+        XCTAssertFalse(disabled.contains("body[data-ds-dark-theme]"))
+        XCTAssertTrue(disabled.contains(":root { color-scheme:"))
+    }
+
     func testSettingsStoreRoundTrip() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
