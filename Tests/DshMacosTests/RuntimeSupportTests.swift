@@ -207,14 +207,17 @@ final class RuntimeSupportTests: XCTestCase {
     func testTitlebarHitRectSkipsTrafficLightsAndStaysAtTop() {
         let bounds = NSRect(x: 0, y: 0, width: 1000, height: 800)
         let unflipped = titlebarHitRect(in: bounds, flipped: false)
-        XCTAssertEqual(unflipped, NSRect(x: 86, y: 764, width: 914, height: 36))
-        XCTAssertTrue(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 790), in: bounds, flipped: false))
-        XCTAssertFalse(shouldHandleTitlebarClick(point: NSPoint(x: 40, y: 790), in: bounds, flipped: false))
+        XCTAssertEqual(unflipped, NSRect(x: 86, y: 786, width: 914, height: 14))
+        XCTAssertTrue(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 792), in: bounds, flipped: false))
+        XCTAssertFalse(shouldHandleTitlebarClick(point: NSPoint(x: 40, y: 792), in: bounds, flipped: false))
+        XCTAssertFalse(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 770), in: bounds, flipped: false))
         XCTAssertFalse(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 400), in: bounds, flipped: false))
 
         let flipped = titlebarHitRect(in: bounds, flipped: true)
         XCTAssertEqual(flipped.origin, NSPoint(x: 86, y: 0))
-        XCTAssertTrue(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 10), in: bounds, flipped: true))
+        XCTAssertEqual(flipped.height, 14)
+        XCTAssertTrue(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 8), in: bounds, flipped: true))
+        XCTAssertFalse(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 28), in: bounds, flipped: true))
         XCTAssertFalse(shouldHandleTitlebarClick(point: NSPoint(x: 500, y: 80), in: bounds, flipped: true))
     }
 

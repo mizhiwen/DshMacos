@@ -16,6 +16,7 @@ struct ContentView: View {
             WallpaperView(settings: model.settings.wallpaper)
                 .ignoresSafeArea()
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(
             GeometryReader { proxy in
@@ -25,7 +26,7 @@ struct ContentView: View {
         .onPreferenceChange(CanvasSizePreferenceKey.self) { canvasSize = $0 }
         .overlay(alignment: .top) {
             TitlebarDragRegion()
-                .frame(height: 36)
+                .frame(height: TitlebarHitMetrics.height)
                 .frame(maxWidth: .infinity)
         }
         .overlay(alignment: .topLeading) {
