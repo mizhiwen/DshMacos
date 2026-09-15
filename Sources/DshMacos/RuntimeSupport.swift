@@ -32,6 +32,8 @@ struct NodeVersion: Comparable, Equatable, CustomStringConvertible {
         return false
     }
 
+    var supportsZstd: Bool { major >= 22 }
+
     static func < (lhs: NodeVersion, rhs: NodeVersion) -> Bool {
         (lhs.major, lhs.minor, lhs.patch) < (rhs.major, rhs.minor, rhs.patch)
     }
@@ -114,6 +116,19 @@ func searchDirectoriesForDshRuntime(
     throw AppError.message(
         "当前 DSH 需要 Node.js 20.12+（推荐 22）。\(found)，请安装或选择兼容版本。"
     )
+}
+
+func resolvedZstdNodeURL(
+    from directories: [URL] = executableSearchDirectories()
+) -> URL? {
+    for directory in directories {
+        let node = directory.appendingPathComponent("node")
+        guard FileManager.default.isExecutableFile(atPath: node.path),
+              let version = nodeVersion(at: node),
+              version.supportsZstd else { continue }
+        return node
+    }
+    return nil
 }
 
 private func nodeVersion(at executable: URL) -> NodeVersion? {

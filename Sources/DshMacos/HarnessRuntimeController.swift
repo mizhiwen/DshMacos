@@ -51,6 +51,14 @@ final class HarnessRuntimeController: ObservableObject {
 
         do {
             try AppPaths.prepare()
+            do {
+                let repaired = try repairLegacyHarnessSessions(in: AppPaths.harnessHome)
+                if repaired > 0 {
+                    record("已兼容 \(repaired) 个旧会话，供新版 Harness 加载", source: "APP")
+                }
+            } catch {
+                record("旧会话兼容修复未完成：\(error.localizedDescription)", source: "ERR")
+            }
             if normalized.launchMode == .external {
                 let url = try normalizedLoopbackURL(normalized.externalURL)
                 try await waitUntilReady(

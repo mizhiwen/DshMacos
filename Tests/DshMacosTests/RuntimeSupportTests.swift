@@ -34,6 +34,126 @@ final class RuntimeSupportTests: XCTestCase {
         XCTAssertTrue(current.supportsParseEnv)
         XCTAssertTrue(older.supportsParseEnv)
         XCTAssertFalse(try XCTUnwrap(NodeVersion("v18.20.4")).supportsParseEnv)
+        XCTAssertTrue(current.supportsZstd)
+        XCTAssertFalse(older.supportsZstd)
+    }
+
+    func testPermissionPresetOriginIsStrippedFromLegacySessionJSONL() {
+        let original = """
+        {"type":"session","version":0,"id":"session-1","createdAt":1}
+        {"type":"permission/preset","seq":0,"time":2,"data":{"preset":"workspace-write","origin":"default"}}
+        {"type":"sandbox/mode","seq":1,"time":3,"data":{"mode":"workspace-write"}}
+        {"type":"permission/preset","seq":5,"time":4,"data":{"origin":"selection","preset":"danger-full-access"}}
+        """
+        let sanitized = sanitizeReleasedV0SessionJSONL(original)
+        XCTAssertEqual(sanitized.changedLines, 2)
+        XCTAssertFalse(sanitized.text.contains("\"origin\""))
+        XCTAssertTrue(sanitized.text.contains("\"preset\":\"workspace-write\""))
+        XCTAssertTrue(sanitized.text.contains("sandbox/mode"))
+        XCTAssertEqual(sanitizeReleasedV0SessionJSONL(sanitized.text).changedLines, 0)
+    }
+
+    func testLegacySessionRepairUpdatesV0LogsAndSkipsVersionedArtifacts() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionDir = root
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent("project", isDirectory: true)
+            .appendingPathComponent("session-1", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+
+        let v0 = sessionDir.appendingPathComponent("session.jsonl")
+        let v3 = sessionDir.appendingPathComponent("session.v3.jsonl")
+        let payload = """
+        {"type":"session","version":0,"id":"session-1","createdAt":1}
+        {"type":"permission/preset","seq":0,"time":2,"data":{"preset":"workspace-write","origin":"default"}}
+        """
+        try payload.write(to: v0, atomically: true, encoding: .utf8)
+        try payload.write(to: v3, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(try repairLegacyHarnessSessions(in: root, zstdNode: nil), 1)
+        XCTAssertFalse(try String(contentsOf: v0, encoding: .utf8).contains("\"origin\""))
+        XCTAssertTrue(try String(contentsOf: v3, encoding: .utf8).contains("\"origin\":\"default\""))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: v0.path + ".origin-backup"))
+        XCTAssertEqual(try repairLegacyHarnessSessions(in: root, zstdNode: nil), 0)
+    }
+
+    func testLegacySessionRepairRewritesConcatenatedZstdLogs() throws {
+        guard let node = resolvedZstdNodeURL() else {
+            throw XCTSkip("需要 Node.js 22+ 才能验证 zstd 会话修复")
+        }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionDir = root
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent("project", isDirectory: true)
+            .appendingPathComponent("session-2", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let artifact = sessionDir.appendingPathComponent("session.jsonl.zstd")
+
+        let header = #"{"type":"session","version":0,"id":"session-2","createdAt":1}"# + "\n"
+        let event = #"{"type":"permission/preset","seq":0,"time":2,"data":{"preset":"workspace-write","origin":"default"}}"# + "\n"
+        let script = """
+        import { writeFileSync } from "node:fs";
+        import { constants, zstdCompressSync } from "node:zlib";
+        const opts = { params: { [constants.ZSTD_c_checksumFlag]: 1 } };
+        writeFileSync(process.argv[1], Buffer.concat([
+          zstdCompressSync(Buffer.from(process.argv[2]), opts),
+          zstdCompressSync(Buffer.from(process.argv[3]), opts)
+        ]));
+        """
+        let process = Process()
+        process.executableURL = node
+        process.arguments = ["--input-type=module", "-e", script, artifact.path, header, event]
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+
+        XCTAssertEqual(try repairLegacyHarnessSessions(in: root, zstdNode: node), 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: artifact.path + ".origin-backup"))
+        XCTAssertTrue(try zstdSessionHasStandaloneHeaderFrame(at: artifact, node: node))
+        XCTAssertEqual(try repairLegacyHarnessSessions(in: root, zstdNode: node), 0)
+    }
+
+    func testLegacySessionRepairRebuildsSingleFrameZstdLogs() throws {
+        guard let node = resolvedZstdNodeURL() else {
+            throw XCTSkip("需要 Node.js 22+ 才能验证 zstd 会话修复")
+        }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sessionDir = root
+            .appendingPathComponent("sessions", isDirectory: true)
+            .appendingPathComponent("project", isDirectory: true)
+            .appendingPathComponent("session-3", isDirectory: true)
+        try FileManager.default.createDirectory(at: sessionDir, withIntermediateDirectories: true)
+        let artifact = sessionDir.appendingPathComponent("session.jsonl.zstd")
+        let body = """
+        {"type":"session","version":0,"id":"session-3","createdAt":1}
+        {"type":"permission/preset","seq":0,"time":2,"data":{"preset":"workspace-write"}}
+        """
+        let script = """
+        import { writeFileSync } from "node:fs";
+        import { constants, zstdCompressSync } from "node:zlib";
+        writeFileSync(process.argv[1], zstdCompressSync(Buffer.from(process.argv[2]), {
+          params: { [constants.ZSTD_c_checksumFlag]: 1 }
+        }));
+        """
+        let process = Process()
+        process.executableURL = node
+        process.arguments = ["--input-type=module", "-e", script, artifact.path, body]
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
+        XCTAssertFalse(try zstdSessionHasStandaloneHeaderFrame(at: artifact, node: node))
+
+        XCTAssertEqual(try repairLegacyHarnessSessions(in: root, zstdNode: node), 1)
+        XCTAssertTrue(try zstdSessionHasStandaloneHeaderFrame(at: artifact, node: node))
+        XCTAssertEqual(try repairLegacyHarnessSessions(in: root, zstdNode: node), 0)
     }
 
     func testUserNodeDirectoriesComeBeforeSystemDirectories() throws {
