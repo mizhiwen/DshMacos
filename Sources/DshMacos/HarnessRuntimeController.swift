@@ -28,6 +28,8 @@ final class HarnessRuntimeController: ObservableObject {
     @Published private(set) var logTail: [String] = []
 
     private var process: Process?
+    private var stdinPipe: Pipe?
+    private var publishedServiceURL: URL?
     private var generation = UUID()
     private let session: URLSession
     private let maxLogLines = 180
@@ -36,7 +38,13 @@ final class HarnessRuntimeController: ObservableObject {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 1.5
         configuration.timeoutIntervalForResource = 2
-        session = URLSession(configuration: configuration)
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieStorage = nil
+        session = URLSession(
+            configuration: configuration,
+            delegate: HTTPRedirectBlockingDelegate.shared,
+            delegateQueue: nil
+        )
     }
 
     var isBusy: Bool { phase == .starting || phase == .stopping }
@@ -47,6 +55,7 @@ final class HarnessRuntimeController: ObservableObject {
         let normalized = settings.normalized()
         let runGeneration = UUID()
         generation = runGeneration
+        publishedServiceURL = nil
         transition(to: .starting, url: nil, error: nil)
 
         do {
@@ -61,8 +70,8 @@ final class HarnessRuntimeController: ObservableObject {
             }
             if normalized.launchMode == .external {
                 let url = try normalizedLoopbackURL(normalized.externalURL)
-                try await waitUntilReady(
-                    url: url,
+                _ = try await waitUntilReady(
+                    fallbackURL: url,
                     timeout: TimeInterval(normalized.startupTimeoutSeconds),
                     generation: runGeneration
                 )
@@ -71,8 +80,18 @@ final class HarnessRuntimeController: ObservableObject {
                 return
             }
 
-            let port = try reserveAvailablePort()
-            let url = URL(string: "http://127.0.0.1:\(port)")!
+            let port = try requestedHarnessPort(from: normalized.arguments)
+            let fallbackURL = URL(string: "http://127.0.0.1:\(port)")!
+            if portArgumentValue(in: normalized.arguments) != "0",
+               let adopted = await adoptExistingHarness(on: fallbackURL)
+            {
+                attachExistingHarness(port: port)
+                persistHarnessServiceURL(adopted)
+                guard generation == runGeneration else { return }
+                record("复用本机已运行的 Harness：\(adopted.host ?? "127.0.0.1"):\(port)", source: "APP")
+                transition(to: .ready, url: adopted, error: nil)
+                return
+            }
             let executable = try resolvedExecutableURL(command: normalized.command)
             let workspace = try resolvedWorkspace(from: normalized.workspace)
             let arguments = materializedArguments(normalized.arguments, port: port)
@@ -88,18 +107,19 @@ final class HarnessRuntimeController: ObservableObject {
             process = child
             processID = child.processIdentifier
             _ = setpgid(child.processIdentifier, child.processIdentifier)
+            HarnessProcessLease.update(pid: child.processIdentifier, port: port)
 
-            try await waitUntilReady(
-                url: url,
+            let url = try await waitUntilReady(
+                fallbackURL: fallbackURL,
                 timeout: TimeInterval(normalized.startupTimeoutSeconds),
                 generation: runGeneration
             )
+            persistHarnessServiceURL(url)
             guard generation == runGeneration else { return }
             transition(to: .ready, url: url, error: nil)
         } catch {
             if let child = process { await terminate(child) }
-            process = nil
-            processID = nil
+            resetProcess()
             guard generation == runGeneration else { return }
             transition(to: .failed, url: nil, error: error.localizedDescription)
             record(error.localizedDescription, source: "ERR")
@@ -111,8 +131,8 @@ final class HarnessRuntimeController: ObservableObject {
         generation = UUID()
         phase = .stopping
         if let child = process { await terminate(child) }
-        process = nil
-        processID = nil
+        HarnessProcessLease.reap()
+        resetProcess()
         transition(to: .stopped, url: nil, error: nil)
     }
 
@@ -123,12 +143,59 @@ final class HarnessRuntimeController: ObservableObject {
 
     func stopImmediately() {
         generation = UUID()
-        guard let child = process, child.isRunning else { return }
-        let pid = child.processIdentifier
-        if kill(-pid, SIGTERM) != 0 { child.terminate() }
-        child.standardOutput = nil
-        child.standardError = nil
+        if let child = process {
+            child.standardOutput = nil
+            child.standardError = nil
+        }
         process = nil
+        processID = nil
+        stdinPipe = nil
+    }
+
+    private func adoptExistingHarness(on fallbackURL: URL) async -> URL? {
+        let adopted = adoptedHarnessURL(
+            port: UInt16(fallbackURL.port ?? Int(HarnessPorts.default)),
+            persisted: persistedHarnessServiceURL(),
+            logged: lastPublishedHarnessURLFromDisk()
+        )
+        if let status = await probeHTTPStatus(adopted), isHarnessReadyStatus(status) {
+            return adopted
+        }
+        if let status = await probeHTTPStatus(fallbackURL), isHarnessReachableStatus(status) {
+            return adopted
+        }
+        return nil
+    }
+
+    private func lastPublishedHarnessURLFromDisk() -> URL? {
+        guard
+            let data = try? String(contentsOf: AppPaths.harnessLog, encoding: .utf8)
+        else {
+            return nil
+        }
+        return lastPublishedHarnessURL(fromLog: data)
+    }
+
+    private func attachExistingHarness(port: UInt16) {
+        let pid = loopbackListenPIDs(on: port).first { pid in
+            guard let command = processCommandLine(pid: pid) else { return false }
+            return isManagedHarnessCommandLine(command, port: port)
+        }
+        processID = pid
+        HarnessProcessLease.update(pid: pid, port: port)
+    }
+
+    private func probeHTTPStatus(_ url: URL) async -> Int? {
+        do {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 1.2
+            request.httpShouldHandleCookies = false
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            let (_, response) = try await session.data(for: request)
+            return (response as? HTTPURLResponse)?.statusCode
+        } catch {
+            return nil
+        }
     }
 
     private func transition(to phase: HarnessPhase, url: URL?, error: String?) {
@@ -153,15 +220,17 @@ final class HarnessRuntimeController: ObservableObject {
         workspace: URL,
         generation: UUID
     ) throws -> Process {
+        let stdin = Pipe()
         let output = Pipe()
         let error = Pipe()
         let child = Process()
         child.executableURL = executable
         child.arguments = arguments
         child.currentDirectoryURL = workspace
-        child.standardInput = FileHandle.nullDevice
+        child.standardInput = stdin
         child.standardOutput = output
         child.standardError = error
+        stdinPipe = stdin
 
         var searchDirectories = executableSearchDirectories()
         if executable.lastPathComponent == "dsh" {
@@ -182,8 +251,8 @@ final class HarnessRuntimeController: ObservableObject {
             error.fileHandleForReading.readabilityHandler = nil
             Task { @MainActor [weak self] in
                 guard let self, self.generation == generation else { return }
-                self.process = nil
-                self.processID = nil
+                self.resetProcess()
+                HarnessProcessLease.update(pid: nil, port: nil)
                 if self.phase == .stopping {
                     self.transition(to: .stopped, url: nil, error: nil)
                 } else {
@@ -208,6 +277,9 @@ final class HarnessRuntimeController: ObservableObject {
     }
 
     private func record(_ text: String, source: String) {
+        if let published = publishedHarnessURL(from: text) {
+            publishedServiceURL = published
+        }
         let lines = text
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -227,30 +299,49 @@ final class HarnessRuntimeController: ObservableObject {
         }
     }
 
-    private func waitUntilReady(url: URL, timeout: TimeInterval, generation: UUID) async throws {
+    private func waitUntilReady(fallbackURL: URL, timeout: TimeInterval, generation: UUID) async throws -> URL {
         let deadline = Date().addingTimeInterval(timeout)
         var lastReason = "服务尚未响应"
+        let watchingProcess = process != nil
         while Date() < deadline {
             guard self.generation == generation else {
                 throw CancellationError()
             }
-            if let child = process, !child.isRunning {
+            if watchingProcess, process == nil || process?.isRunning == false {
                 throw AppError.message("Harness 进程在启动完成前退出")
             }
+            let url = publishedServiceURL ?? fallbackURL
             do {
                 var request = URLRequest(url: url)
                 request.timeoutInterval = 1.5
+                request.httpShouldHandleCookies = false
+                request.cachePolicy = .reloadIgnoringLocalCacheData
                 let (_, response) = try await session.data(for: request)
-                if let http = response as? HTTPURLResponse, (200 ..< 400).contains(http.statusCode) {
-                    return
+                if let http = response as? HTTPURLResponse {
+                    if isHarnessReadyStatus(http.statusCode) {
+                        return url
+                    }
+                    lastReason = urlHasPendingAuth(http.statusCode, url: url)
+                        ? "服务已启动，正在等待启动 token"
+                        : "服务返回了非成功状态（HTTP \(http.statusCode)）"
                 }
-                lastReason = "服务返回了非成功状态"
             } catch {
                 lastReason = error.localizedDescription
             }
             try await Task.sleep(nanoseconds: 350_000_000)
         }
         throw AppError.message("Harness 启动超时：\(lastReason)")
+    }
+
+    private func urlHasPendingAuth(_ status: Int, url: URL) -> Bool {
+        status == 401 && !urlHasLaunchToken(url)
+    }
+
+    private func resetProcess() {
+        stdinPipe = nil
+        process = nil
+        processID = nil
+        publishedServiceURL = nil
     }
 
     private func terminate(_ child: Process) async {
@@ -268,30 +359,16 @@ final class HarnessRuntimeController: ObservableObject {
     }
 }
 
-private func reserveAvailablePort() throws -> UInt16 {
-    let descriptor = socket(AF_INET, SOCK_STREAM, 0)
-    guard descriptor >= 0 else { throw AppError.message("无法创建本机端口") }
-    defer { close(descriptor) }
+private final class HTTPRedirectBlockingDelegate: NSObject, URLSessionTaskDelegate {
+    static let shared = HTTPRedirectBlockingDelegate()
 
-    var address = sockaddr_in()
-    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-    address.sin_family = sa_family_t(AF_INET)
-    address.sin_port = in_port_t(0)
-    address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
-
-    let bindResult = withUnsafePointer(to: &address) { pointer in
-        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-            bind(descriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
-        }
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
-    guard bindResult == 0 else { throw AppError.message("无法绑定本机端口") }
-
-    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-    let nameResult = withUnsafeMutablePointer(to: &address) { pointer in
-        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-            getsockname(descriptor, socketAddress, &length)
-        }
-    }
-    guard nameResult == 0 else { throw AppError.message("无法读取本机端口") }
-    return UInt16(bigEndian: address.sin_port)
 }

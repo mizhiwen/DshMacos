@@ -181,11 +181,97 @@ final class RuntimeSupportTests: XCTestCase {
         XCTAssertThrowsError(try normalizedLoopbackURL("file:///tmp/index.html"))
     }
 
+    func testPublishedHarnessURLReadsLaunchTokenFromDshWebLine() throws {
+        let url = try XCTUnwrap(
+            publishedHarnessURL(
+                from: "dsh web: http://127.0.0.1:52829/?token=L5xPqgSvFQlqmgXLVOPTcg_kxSpeMbClRjCuZSEdvWM"
+            )
+        )
+        XCTAssertEqual(url.host, "127.0.0.1")
+        XCTAssertEqual(url.port, 52829)
+        XCTAssertTrue(urlHasLaunchToken(url))
+    }
+
+    func testPublishedHarnessURLPrefersLoopbackTokenOverLANAddress() throws {
+        let url = try XCTUnwrap(
+            publishedHarnessURL(
+                from: "dsh web: http://127.0.0.1:3080/?token=abc (LAN: http://192.168.1.8:3080/?token=abc)"
+            )
+        )
+        XCTAssertEqual(url.host, "127.0.0.1")
+        XCTAssertEqual(url.port, 3080)
+        XCTAssertTrue(urlHasLaunchToken(url))
+    }
+
+    func testPublishedHarnessURLIgnoresRemoteAddresses() {
+        XCTAssertNil(publishedHarnessURL(from: "open https://example.com/?token=abc"))
+    }
+
+    func testTokenRedirectAndBareOriginAreTheSameHarness() throws {
+        let authenticated = try XCTUnwrap(URL(string: "http://127.0.0.1:52829/?token=abc"))
+        let clean = try XCTUnwrap(URL(string: "http://127.0.0.1:52829/"))
+        XCTAssertTrue(urlsShareOrigin(authenticated, clean))
+        XCTAssertTrue(isHarnessReadyStatus(303))
+        XCTAssertFalse(isHarnessReadyStatus(401))
+    }
+
     func testPortTemplateIsMaterializedWithoutShellParsing() {
         XCTAssertEqual(
             materializedArguments(["web", "--port", "{port}", "prefix-{port}"], port: 43123),
             ["web", "--port", "43123", "prefix-43123"]
         )
+        XCTAssertEqual(
+            materializedArguments(["web", "--port", "0"], port: 43123),
+            ["web", "--port", "43123"]
+        )
+    }
+
+    func testManagedHarnessCommandLineMatchesFixedPort() {
+        XCTAssertTrue(
+            isManagedHarnessCommandLine(
+                "node /Users/mi/.npm-global/bin/dsh web --no-open --port 3080",
+                port: 3080
+            )
+        )
+        XCTAssertFalse(
+            isManagedHarnessCommandLine(
+                "node /Users/mi/.npm-global/bin/dsh web --no-open --port 3080",
+                port: 43123
+            )
+        )
+        XCTAssertFalse(
+            isManagedHarnessCommandLine(
+                "node server.js --port 3080",
+                port: 3080
+            )
+        )
+        XCTAssertEqual(parseListenPIDs(from: "77376\n77380\n"), [77376, 77380])
+    }
+
+    func testAdoptedHarnessURLPrefersPersistedTokenOnSamePort() throws {
+        let persisted = try XCTUnwrap(URL(string: "http://127.0.0.1:3080/?token=abc"))
+        let logged = try XCTUnwrap(URL(string: "http://127.0.0.1:3080/?token=old"))
+        let adopted = adoptedHarnessURL(port: 3080, persisted: persisted, logged: logged)
+        XCTAssertTrue(urlHasLaunchToken(adopted))
+        XCTAssertEqual(adopted.query, "token=abc")
+        XCTAssertTrue(isHarnessReachableStatus(401))
+        XCTAssertTrue(isHarnessReachableStatus(303))
+        XCTAssertFalse(isHarnessReachableStatus(500))
+        XCTAssertEqual(
+            lastPublishedHarnessURL(fromLog: """
+            [APP] 启动 dsh web
+            [OUT] dsh web: http://127.0.0.1:3080/?token=from-log
+            """),
+            try XCTUnwrap(URL(string: "http://127.0.0.1:3080/?token=from-log"))
+        )
+    }
+
+    func testRequestedHarnessPortDefaultsTo3080() throws {
+        XCTAssertEqual(try requestedHarnessPort(from: ["web", "--no-open"]), HarnessPorts.default)
+        XCTAssertEqual(try requestedHarnessPort(from: ["web", "--port", "{port}"]), 3080)
+        XCTAssertEqual(try requestedHarnessPort(from: ["web", "--port", "3080"]), 3080)
+        XCTAssertEqual(try requestedHarnessPort(from: ["web", "--port", "43123"]), 43123)
+        XCTAssertThrowsError(try requestedHarnessPort(from: ["web", "--port", "abc"]))
     }
 
     func testRelativeExecutableNameSearchesConfiguredDirectories() throws {
@@ -216,7 +302,17 @@ final class RuntimeSupportTests: XCTestCase {
         let migrated = settings.normalized()
         XCTAssertEqual(migrated.version, AppSettings.currentVersion)
         XCTAssertEqual(migrated.command, "dsh")
-        XCTAssertEqual(migrated.arguments, ["web", "--no-open", "--port", "{port}"])
+        XCTAssertEqual(migrated.arguments, ["web", "--no-open", "--port", "3080"])
+    }
+
+    func testLegacyRandomPortPlaceholderMigratesToFixedDefault() {
+        var settings = AppSettings()
+        settings.version = 6
+        settings.arguments = ["web", "--no-open", "--port", "{port}"]
+
+        let migrated = settings.normalized()
+        XCTAssertEqual(migrated.version, 7)
+        XCTAssertEqual(migrated.arguments, ["web", "--no-open", "--port", "3080"])
     }
 
     func testLegacySettingsDecodeWithSystemAppearance() throws {

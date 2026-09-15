@@ -12,6 +12,8 @@ enum AppPaths {
     static var wallpapers: URL { root.appendingPathComponent("wallpapers", isDirectory: true) }
     static var logs: URL { root.appendingPathComponent("logs", isDirectory: true) }
     static var harnessLog: URL { logs.appendingPathComponent("harness.log") }
+    static var harnessPID: URL { root.appendingPathComponent("harness.pid") }
+    static var harnessServiceURL: URL { root.appendingPathComponent("harness-url.txt") }
 
     static func prepare() throws {
         for directory in [root, harnessHome, defaultWorkspace, wallpapers, logs] {

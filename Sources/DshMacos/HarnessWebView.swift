@@ -49,7 +49,7 @@ struct HarnessWebView: NSViewRepresentable {
         webView.superview?.layer?.isOpaque = false
         webView.superview?.layer?.backgroundColor = NSColor.clear.cgColor
         context.coordinator.applyAppearance()
-        if webView.url?.absoluteString != url.absoluteString, !webView.isLoading {
+        if !urlsShareOrigin(webView.url, url), !webView.isLoading {
             webView.load(URLRequest(url: url))
         }
     }
@@ -90,7 +90,7 @@ struct HarnessWebView: NSViewRepresentable {
                 decisionHandler(.cancel)
                 return
             }
-            if target.absoluteString == "about:blank" || isSameOrigin(target, allowedURL) {
+            if target.absoluteString == "about:blank" || urlsShareOrigin(target, allowedURL) {
                 decisionHandler(.allow)
                 return
             }
@@ -110,20 +110,6 @@ struct HarnessWebView: NSViewRepresentable {
             return nil
         }
 
-        private func isSameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
-            lhs.scheme?.lowercased() == rhs.scheme?.lowercased()
-                && lhs.host?.lowercased() == rhs.host?.lowercased()
-                && effectivePort(lhs) == effectivePort(rhs)
-        }
-
-        private func effectivePort(_ url: URL) -> Int? {
-            if let port = url.port { return port }
-            switch url.scheme?.lowercased() {
-            case "http": return 80
-            case "https": return 443
-            default: return nil
-            }
-        }
     }
 }
 

@@ -92,13 +92,13 @@ struct WallpaperSettings: Codable, Equatable {
 }
 
 struct AppSettings: Codable, Equatable {
-    static let currentVersion = 5
+    static let currentVersion = 7
 
     var version = AppSettings.currentVersion
     var autoStart = false
     var launchMode: HarnessLaunchMode = .managed
     var command = "dsh"
-    var arguments = ["web", "--no-open", "--port", "{port}"]
+    var arguments = ["web", "--no-open", "--port", String(HarnessPorts.default)]
     var workspace = ""
     var externalURL = "http://127.0.0.1:3080"
     var startupTimeoutSeconds = 60
@@ -151,6 +151,11 @@ struct AppSettings: Codable, Equatable {
         }
         if copy.version < 5, copy.controlDock.edge == .top {
             copy.controlDock = ControlDockSettings()
+        }
+        if copy.version < 7 {
+            copy.arguments = copy.arguments.map {
+                $0 == "{port}" ? String(HarnessPorts.default) : $0
+            }
         }
         copy.version = AppSettings.currentVersion
         copy.command = copy.command.trimmingCharacters(in: .whitespacesAndNewlines)

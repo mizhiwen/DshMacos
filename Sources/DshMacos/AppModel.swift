@@ -13,23 +13,11 @@ final class AppModel: ObservableObject {
     let runtime = HarnessRuntimeController()
 
     private let store: SettingsStore
-    private var terminationObserver: NSObjectProtocol?
 
     init(store: SettingsStore = SettingsStore()) {
         self.store = store
         settings = store.load()
         try? AppPaths.prepare()
-
-        let runtime = runtime
-        terminationObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { _ in
-            Task { @MainActor [weak runtime] in
-                runtime?.stopImmediately()
-            }
-        }
 
         if settings.autoStart {
             Task { [weak self] in
@@ -37,10 +25,6 @@ final class AppModel: ObservableObject {
                 await self.runtime.start(using: self.settings)
             }
         }
-    }
-
-    deinit {
-        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
     }
 
     func showSettings() {

@@ -194,7 +194,7 @@ struct SettingsView: View {
                 } footer: {
                     Text(
                         model.settings.launchMode == .managed
-                            ? "只填可执行文件名，不走终端。参数每行一条，{port} 会换成随机端口。"
+                            ? "只填可执行文件名，不走终端。参数每行一条，默认端口 3080；{port} 也会换成 3080，写成 0 则由系统分配空闲端口。"
                             : "例如 http://127.0.0.1:3080，仅限本机回环地址。"
                     )
                 }
