@@ -5,7 +5,7 @@ PROJECT_ROOT="${0:A:h:h}"
 SOURCE_SVG="$PROJECT_ROOT/Resources/AppIcon.svg"
 OUTPUT_ICNS="$PROJECT_ROOT/Resources/DeepSeekHarness.icns"
 ICON_TEMP="$(mktemp -d -t dsh-macos-icon)"
-RENDER_DIR="$ICON_TEMP/render"
+RENDER_PNG="$ICON_TEMP/AppIcon.png"
 ICONSET_DIR="$ICON_TEMP/DeepSeekHarness.iconset"
 
 cleanup() {
@@ -13,17 +13,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$RENDER_DIR" "$ICONSET_DIR"
-qlmanage -t -s 1024 -o "$RENDER_DIR" "$SOURCE_SVG" >/dev/null
-SOURCE_PNG="$RENDER_DIR/AppIcon.svg.png"
+if [[ -d /Applications/Xcode.app/Contents/Developer ]]; then
+  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
 
-if [[ ! -f "$SOURCE_PNG" ]]; then
+mkdir -p "$ICONSET_DIR"
+/usr/bin/swift "$PROJECT_ROOT/scripts/render-icon.swift" "$SOURCE_SVG" "$RENDER_PNG" 1024
+
+if [[ ! -f "$RENDER_PNG" ]]; then
   echo "无法渲染应用图标：$SOURCE_SVG" >&2
   exit 1
 fi
 
 while read -r name size; do
-  sips -z "$size" "$size" "$SOURCE_PNG" --out "$ICONSET_DIR/$name" >/dev/null
+  sips -z "$size" "$size" "$RENDER_PNG" --out "$ICONSET_DIR/$name" >/dev/null
 done <<'SIZES'
 icon_16x16.png 16
 icon_16x16@2x.png 32
