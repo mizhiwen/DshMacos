@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum TitlebarHitMetrics {
-    static let height: CGFloat = 14
+    static let height: CGFloat = 24
     static let leadingReserve: CGFloat = 86
 }
 
